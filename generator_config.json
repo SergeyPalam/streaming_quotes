@@ -2,11 +2,13 @@
     {
         "name": "AMD",
         "upper_bound_price": "1000.0",
-        "upper_bound_volume": "1000000.0"
+        "upper_bound_volume": "1000000.0",
+        "lower_bound_volume": "1000"
     },
     {
         "name": "INT",
         "upper_bound_price": "2000.0",
-        "upper_bound_volume": "2000000.0"
+        "upper_bound_volume": "2000000.0",
+        "lower_bound_volume": "1000"
     }
 ]
