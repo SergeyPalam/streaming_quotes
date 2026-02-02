@@ -1,14 +1,26 @@
-use streaming_quotes::server::quotes_server::{QuotesServer, ServerControl, ControlCmd};
-use log::*;
+use streaming_quotes::server::quotes_server::{QuotesServer, ControlCmd};
+use streaming_quotes::init_log;
+use std::path::Path;
+use clap::Parser;
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Server config path
+    #[arg(short, long)]
+    config_path: String,
+}
 
 fn main() {
-    if let Err(e) = init_log(Path::new(".")) {
+    if let Err(e) = init_log(Path::new("logs"), "server.log") {
         println!("Can't init logger: {e}");
         return;
     }
 
+    let args = Args::parse();
+
     let quotes_server =
-    match QuotesServer::new("") {
+    match QuotesServer::new(&args.config_path) {
         Ok(val) => val,
         Err(e) => {
             log::error!("Can't create server: {e}");
@@ -29,13 +41,23 @@ fn main() {
     let stdin = std::io::stdin();
     loop {
          println!("To stop server type \"exit\"");
-         stdin.read_line(&mut buffer)?;
-         if cmd_buf.to_lowercase() == "exit" {
+         if let Err(e) = stdin.read_line(&mut cmd_buf) {
+            log::error!("Can't read new command: {e}");
             break;
+         }
+         if cmd_buf.trim().to_lowercase() == "exit" {
+            break;
+         }else{
+            cmd_buf.clear();
          }
     }
 
-    server_control.tx.send(ControlCmd::Stop);
-    server_control.thread_handle.join();
+    if let Err(e) = server_control.tx.send(ControlCmd::Stop) {
+        log::error!("Stop error: {e}");
+    }
+    
+    if server_control.thread_handle.join().is_err(){
+        log::error!("Can't join thread");
+    }
     log::info!("Exit");
 }

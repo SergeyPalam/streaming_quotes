@@ -1,16 +1,23 @@
 use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use rand::prelude::*;
-use rand_distr::{StandardNormal, StandardUniform};
+use rand_distr::{Normal, StandardUniform};
 use std::collections::HashMap;
 use anyhow::{bail, Result};
+use std::fmt::Display;
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Debug)]
 pub struct StockQuote {
     pub ticker: String,
     pub price: f64,
     pub volume: u32,
     pub timestamp: u64,
+}
+
+impl Display for StockQuote {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "T: {}, P: {:.4}, V: {}, TIME: {}", self.ticker, self.price, self.volume, self.timestamp)
+    }
 }
 
 struct Ticker {
@@ -22,11 +29,12 @@ struct Ticker {
 
 impl Ticker {
     fn from_json(json: Value) -> Option<Ticker> {
+        let upper_bound_price = json["upper_bound_price"].as_f64()?;
         Some(Ticker {
-            upper_bound_price: json["upper_bound_price"].as_f64()?,
+            upper_bound_price,
             upper_bound_volume: json["upper_bound_volume"].as_u64()? as u32,
             lower_bound_volume: json["lower_bound_volume"].as_u64()? as u32,
-            current_price: 0.0,
+            current_price: upper_bound_price / 2.0,
         })
     }
 }
@@ -43,6 +51,7 @@ impl Ticker {
 pub struct QuoteGenerator {
     tickers: HashMap<String, Ticker>,
     timestamp_counter: u64,
+    normal_distr: Normal<f64>,
 }
 
 impl QuoteGenerator {
@@ -69,6 +78,7 @@ impl QuoteGenerator {
         Ok(Self {
             tickers,
             timestamp_counter: 1,
+            normal_distr: Normal::new(0.0, 0.5)?,
         })
     }
 
@@ -80,8 +90,8 @@ impl QuoteGenerator {
         quote.timestamp = self.timestamp_counter;
         self.timestamp_counter += 1;
 
-        let val_price: f64 = rand::rng().sample(StandardNormal);
-        quote.price = quote.price + (ticker.price_range() / 8.0) * val_price;
+        let val_price: f64 = rand::rng().sample(self.normal_distr);
+        quote.price = ticker.current_price + (ticker.price_range() / 64.0) * val_price;
         if quote.price < 0.0 {
             quote.price = 0.0;
         }
