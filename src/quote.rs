@@ -1,9 +1,9 @@
-use serde::{Serialize, Deserialize};
-use serde_json::Value;
+use anyhow::{Result, bail};
 use rand::prelude::*;
 use rand_distr::{Normal, StandardUniform};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
-use anyhow::{bail, Result};
 use std::fmt::Display;
 
 #[derive(Serialize, Deserialize, Default, Debug)]
@@ -21,7 +21,11 @@ pub struct StockQuote {
 
 impl Display for StockQuote {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "T: {}, P: {:.4}, V: {}, TIME: {}", self.ticker, self.price, self.volume, self.timestamp)
+        write!(
+            f,
+            "T: {}, P: {:.4}, V: {}, TIME: {}",
+            self.ticker, self.price, self.volume, self.timestamp
+        )
     }
 }
 
@@ -45,7 +49,7 @@ impl Ticker {
 }
 
 impl Ticker {
-    fn price_range(&self) -> f64{
+    fn price_range(&self) -> f64 {
         self.upper_bound_price
     }
     fn volume_range(&self) -> u32 {
@@ -85,16 +89,14 @@ impl QuoteGenerator {
         let mut tickers = HashMap::new();
 
         for ticker_json in json {
-            let ticker_name =
-            if let Some(val) = ticker_json["name"].as_str() {
+            let ticker_name = if let Some(val) = ticker_json["name"].as_str() {
                 val.to_string()
-            }else{
+            } else {
                 bail!("Can't read ticker name from config: {json_str}");
             };
-            let ticker =
-            if let Some(val) = Ticker::from_json(ticker_json) {
+            let ticker = if let Some(val) = Ticker::from_json(ticker_json) {
                 val
-            }else{
+            } else {
                 bail!("Can't read ticker params from config: {json_str}");
             };
             tickers.insert(ticker_name, ticker);
@@ -127,15 +129,15 @@ impl QuoteGenerator {
 
         let val_volume: u32 = rand::rng().sample(StandardUniform);
         quote.volume = val_volume % ticker.volume_range() + ticker.lower_bound_volume;
-        
+
         Some(quote)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
     use std::fs::File;
+    use std::io::Write;
 
     use super::*;
     use serde_json::json;
@@ -174,7 +176,8 @@ mod tests {
                 "upper_bound_volume": 2000000,
                 "lower_bound_volume": 1000
             }
-        ]).to_string();
+        ])
+        .to_string();
         file.write_all(config.as_bytes()).unwrap();
         file.flush().unwrap();
 

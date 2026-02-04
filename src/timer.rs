@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use std::time::Duration;
-use std::thread;
 use anyhow::{Result, bail};
+use std::collections::HashMap;
+use std::thread;
+use std::time::Duration;
 
 const TICK_MILLIS: u64 = 10;
 
@@ -25,7 +25,7 @@ impl Event {
     }
 
     fn is_expired(&self) -> bool {
-        if self.counter >= (self.bound / TICK_MILLIS){
+        if self.counter >= (self.bound / TICK_MILLIS) {
             return true;
         }
         false
@@ -50,15 +50,14 @@ impl Timer {
 
     /// Подписывает событие на мониторинг
     pub fn add_event(&mut self, event_name: &str, bound_millis: u64) {
-        self.events.insert(event_name.to_string(), Event::new(bound_millis));
+        self.events
+            .insert(event_name.to_string(), Event::new(bound_millis));
     }
 
     /// Удаляет подписку события для таймера
     pub fn remove_event(&mut self, event_name: &str) -> Result<()> {
         match self.events.remove(event_name) {
-            Some(_) => {
-                Ok(())
-            }
+            Some(_) => Ok(()),
             None => {
                 bail!("Wrong event name");
             }
@@ -81,9 +80,7 @@ impl Timer {
     /// Прошло ли время для события
     pub fn is_expired_event(&self, event_name: &str) -> Result<bool> {
         match self.events.get(event_name) {
-            Some(evt) => {
-                Ok(evt.is_expired())
-            }
+            Some(evt) => Ok(evt.is_expired()),
             None => {
                 bail!("Wrong event name");
             }

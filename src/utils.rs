@@ -1,11 +1,11 @@
-use std::collections::VecDeque;
 use anyhow::{Result, bail};
-use std::io::{Read, ErrorKind};
+use std::collections::VecDeque;
+use std::io::{ErrorKind, Read};
 
 #[derive(Default)]
 
 /// Объект позволяющий накапливать данные из потока и и читать данные пакетами
-pub struct StreamReader{
+pub struct StreamReader {
     buf: VecDeque<u8>,
 }
 
@@ -13,7 +13,7 @@ impl StreamReader {
     /// Читает в буфер все данные, доступные в потоке
     pub fn read_from_stream<T: Read>(&mut self, stream: &mut T) -> Result<()> {
         let mut buf = vec![0u8; 512];
-        
+
         match stream.read(&mut buf) {
             Ok(len) => {
                 for i in 0..len {
@@ -21,12 +21,10 @@ impl StreamReader {
                 }
                 return Ok(());
             }
-            Err(e) => {
-                match e.kind() {
-                    ErrorKind::WouldBlock | ErrorKind::UnexpectedEof => return Ok(()),
-                    _ => bail!("{e}"),
-                }
-            }
+            Err(e) => match e.kind() {
+                ErrorKind::WouldBlock | ErrorKind::UnexpectedEof => return Ok(()),
+                _ => bail!("{e}"),
+            },
         }
     }
 
@@ -41,14 +39,14 @@ impl StreamReader {
             res.push(self.buf.pop_front()?);
         }
         Some(res)
-    } 
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Cursor;
-    
+
     #[test]
     fn test_stream_reader() {
         let buf = vec![1u8, 2, 3];

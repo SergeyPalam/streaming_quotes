@@ -1,7 +1,7 @@
-use serde::{Serialize, Deserialize};
 use super::quote::StockQuote;
-use postcard::to_stdvec;
 use anyhow::Result;
+use postcard::to_stdvec;
+use serde::{Deserialize, Serialize};
 
 /// Максимальный размер датаграммы. Если пакет будет больше, то нужно учесть нумерацию пакетов
 pub const MAX_SIZE_DATAGRAM: usize = 100;

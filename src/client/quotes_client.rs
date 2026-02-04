@@ -1,13 +1,13 @@
+use crate::protocol::*;
+use crate::timer::Timer;
+use anyhow::{Result, bail};
+use std::fmt::Display;
+use std::io::BufReader;
 use std::io::{BufRead, ErrorKind, Write};
 use std::net::{SocketAddr, TcpStream, UdpSocket};
 use std::sync::mpsc;
-use anyhow::{Result, bail};
-use std::io::BufReader;
-use std::thread;
 use std::sync::mpsc::TryRecvError;
-use crate::protocol::*;
-use crate::timer::Timer;
-use std::fmt::Display;
+use std::thread;
 
 const PING_PERIOD_MILLIS: u64 = 30000;
 const WAIT_PONG_MILLIS: u64 = 5000;
@@ -26,21 +26,17 @@ pub enum ClientCmd {
 }
 
 fn is_stop_cmd(rx: &mpsc::Receiver<ClientCmd>) -> bool {
-    match rx.try_recv(){
-        Ok(cmd) => {
-            match cmd {
-                ClientCmd::Stop => return true,
-            }
+    match rx.try_recv() {
+        Ok(cmd) => match cmd {
+            ClientCmd::Stop => return true,
         },
-        Err(e) => {
-            match e {
-                TryRecvError::Disconnected => {
-                    log::warn!("Parent thread is died");
-                    return true;
-                }
-                TryRecvError::Empty => return false,
+        Err(e) => match e {
+            TryRecvError::Disconnected => {
+                log::warn!("Parent thread is died");
+                return true;
             }
-        }
+            TryRecvError::Empty => return false,
+        },
     }
 }
 
@@ -60,9 +56,7 @@ struct PingPong {
 
 impl PingPong {
     fn new(server_addr: SocketAddr) -> Self {
-        Self{
-            server_addr,
-        }
+        Self { server_addr }
     }
 
     fn ping(sock: &UdpSocket) -> Result<()> {
@@ -74,14 +68,12 @@ impl PingPong {
 
     fn is_pong_received(sock: &UdpSocket) -> bool {
         let mut recv_buf = [0u8; MAX_SIZE_DATAGRAM];
-        let pack_len =
-        match sock.recv(&mut recv_buf) {
+        let pack_len = match sock.recv(&mut recv_buf) {
             Ok(len) => len,
             Err(_) => return false,
         };
 
-        let msg =
-        match postcard::from_bytes::<Message>(&recv_buf[..pack_len]){
+        let msg = match postcard::from_bytes::<Message>(&recv_buf[..pack_len]) {
             Ok(msg) => msg,
             Err(_) => return false,
         };
@@ -93,7 +85,7 @@ impl PingPong {
             _ => {
                 log::warn!("Wrong response");
                 return false;
-            },
+            }
         }
     }
 
@@ -103,7 +95,7 @@ impl PingPong {
         udp_sock.connect(self.server_addr)?;
         log::info!("Ping pong start to server: {}", self.server_addr);
         let (tx, rx) = mpsc::channel();
-        let handle = thread::spawn(move ||{
+        let handle = thread::spawn(move || {
             let mut state = PingState::WaitPing;
             let mut timer = Timer::default();
             timer.add_event(WAIT_PING_EVENT, PING_PERIOD_MILLIS);
@@ -111,7 +103,7 @@ impl PingPong {
 
             loop {
                 timer.sleep();
-                if timer.is_expired_event(WAIT_CMD_EVENT)?{
+                if timer.is_expired_event(WAIT_CMD_EVENT)? {
                     timer.reset_event(WAIT_CMD_EVENT)?;
                     if is_stop_cmd(&rx) {
                         log::debug!("Stop ping from stop cmd");
@@ -121,7 +113,7 @@ impl PingPong {
 
                 match state {
                     PingState::WaitPing => {
-                        if timer.is_expired_event(WAIT_PING_EVENT)?{
+                        if timer.is_expired_event(WAIT_PING_EVENT)? {
                             Self::ping(&udp_sock)?;
                             timer.remove_event(WAIT_PING_EVENT)?;
                             timer.add_event(WAIT_PONG_EVENT, WAIT_PONG_MILLIS);
@@ -129,7 +121,7 @@ impl PingPong {
                         }
                     }
                     PingState::WaitPong => {
-                        if timer.is_expired_event(WAIT_PONG_EVENT)?{
+                        if timer.is_expired_event(WAIT_PONG_EVENT)? {
                             if !Self::is_pong_received(&udp_sock) {
                                 log::info!("Pong doesn't received");
                                 break;
@@ -145,7 +137,7 @@ impl PingPong {
             log::info!("Ping pong finish");
             Ok(())
         });
-        Ok(PingControl{
+        Ok(PingControl {
             thread_handle: handle,
             tx,
         })
@@ -170,7 +162,11 @@ pub struct QuotesClient {
 
 impl Display for QuotesClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "serv addr: {}, receive quotes port: {}", self.server_addr, self.recv_quote_port)?;
+        write!(
+            f,
+            "serv addr: {}, receive quotes port: {}",
+            self.server_addr, self.recv_quote_port
+        )?;
         writeln!(f, "Tickers:")?;
         for ticker in self.tickers.iter() {
             writeln!(f, "{ticker}")?;
@@ -179,13 +175,12 @@ impl Display for QuotesClient {
     }
 }
 
-
 impl QuotesClient {
     /// Создаёт новый клиент котировок:
     /// server_addr - ip-алрес сервера для подключения по tcp
     /// recv_quote_port - Порт для приема котировок
     /// tickers_path - Путь к файлу с котировками в формате:
-    /// 
+    ///
     /// TICKER1
     /// TICKER2
     pub fn new(server_addr: &str, recv_quote_port: u16, tickers_path: &str) -> Result<Self> {
@@ -196,7 +191,7 @@ impl QuotesClient {
             tickers.push(line?);
         }
 
-        Ok(Self{
+        Ok(Self {
             server_addr: server_addr.parse()?,
             recv_quote_port,
             tickers,
@@ -205,24 +200,20 @@ impl QuotesClient {
 
     fn recv_quotes(sock: &UdpSocket, ping_control: &mut Option<PingControl>) -> Result<()> {
         let mut recv_buf = [0u8; MAX_SIZE_DATAGRAM];
-        let (pack_len, server_addr) =
-        match sock.recv_from(&mut recv_buf){
+        let (pack_len, server_addr) = match sock.recv_from(&mut recv_buf) {
             Ok((len, addr)) => (len, addr),
-            Err(e) => {
-                match e.kind() {
-                    ErrorKind::WouldBlock => return Ok(()),
-                    _ => bail!("{e}"),
-                }
-            }
+            Err(e) => match e.kind() {
+                ErrorKind::WouldBlock => return Ok(()),
+                _ => bail!("{e}"),
+            },
         };
-        
+
         if let Some(control) = ping_control.as_ref() {
             if control.thread_handle.is_finished() {
                 bail!("Server at address {server_addr} doesn't response");
             }
-        }else{
-            let control =
-            match PingPong::new(server_addr).start(){
+        } else {
+            let control = match PingPong::new(server_addr).start() {
                 Ok(val) => val,
                 Err(e) => {
                     bail!("Can't start ping pong logic: {e}");
@@ -232,8 +223,7 @@ impl QuotesClient {
         }
 
         let msg = postcard::from_bytes::<Message>(&recv_buf[..pack_len])?;
-        let quotes =
-        match msg {
+        let quotes = match msg {
             Message::Quote(quotes) => quotes,
             _ => {
                 bail!("Wrong response");
@@ -263,12 +253,12 @@ impl QuotesClient {
         log::debug!("Pack message len: {}", bin_req.len());
         stream.write_all(&bin_req)?;
 
-        let handle = std::thread::spawn(move||{
+        let handle = std::thread::spawn(move || {
             let mut ping_control: Option<PingControl> = None;
             let mut timer = Timer::default();
             timer.add_event(WAIT_QUOTES_EVENT, WAIT_QUOTES_MILLIS);
             timer.add_event(WAIT_CMD_EVENT, HANDLE_CMD_PERIOD_MILLIS);
-            loop{
+            loop {
                 timer.sleep();
                 if timer.is_expired_event(WAIT_CMD_EVENT)? {
                     timer.reset_event(WAIT_CMD_EVENT)?;
@@ -287,10 +277,9 @@ impl QuotesClient {
                 }
             }
 
-            let res = 
-            if let Some(control) = ping_control {
+            let res = if let Some(control) = ping_control {
                 control.tx.send(ClientCmd::Stop)?;
-                match control.thread_handle.join(){
+                match control.thread_handle.join() {
                     Ok(res) => res,
                     Err(_) => {
                         bail!("Can't join thread");
@@ -304,10 +293,9 @@ impl QuotesClient {
             res
         });
 
-        Ok(ClientControl{
+        Ok(ClientControl {
             thread_handle: handle,
             tx,
         })
     }
-
 }

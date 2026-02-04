@@ -21,16 +21,20 @@ pub mod timer;
 pub mod utils;
 
 use anyhow::Result;
-use flexi_logger::{Logger, FileSpec, Duplicate, opt_format};
+use flexi_logger::{Duplicate, FileSpec, Logger, opt_format};
 use std::path::Path;
 
 /// Инициализация лога
 #[cfg(debug_assertions)]
 pub fn init_log(log_path_dir: &Path, base_name: &str) -> Result<()> {
-    Logger::try_with_str("debug")?.
-        log_to_file(FileSpec::default().directory(log_path_dir).basename(base_name)).
-        duplicate_to_stdout(Duplicate::All).
-        format(opt_format)
+    Logger::try_with_str("debug")?
+        .log_to_file(
+            FileSpec::default()
+                .directory(log_path_dir)
+                .basename(base_name),
+        )
+        .duplicate_to_stdout(Duplicate::All)
+        .format(opt_format)
         .start()?;
 
     Ok(())
@@ -38,9 +42,13 @@ pub fn init_log(log_path_dir: &Path, base_name: &str) -> Result<()> {
 
 #[cfg(not(debug_assertions))]
 pub fn init_log(log_path_dir: &Path) -> Result<()> {
-    Logger::try_with_str("info")?.
-        log_to_file(FileSpec::default().directory(log_path_dir).basename("server.log")).
-        duplicate_to_stdout(Duplicate::All)
+    Logger::try_with_str("info")?
+        .log_to_file(
+            FileSpec::default()
+                .directory(log_path_dir)
+                .basename("server.log"),
+        )
+        .duplicate_to_stdout(Duplicate::All)
         .start()?;
 
     Ok(())

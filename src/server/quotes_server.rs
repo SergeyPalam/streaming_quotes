@@ -1,13 +1,13 @@
-use std::net::{TcpListener, TcpStream, SocketAddr, UdpSocket, IpAddr};
-use std::sync::mpsc::{self, Receiver, TryRecvError, Sender};
-use std::sync::{Arc, Mutex};
-use std::thread;
-use crate::quote::{QuoteGenerator, StockQuote};
 use crate::protocol::*;
+use crate::quote::{QuoteGenerator, StockQuote};
 use crate::timer::Timer;
 use crate::utils::StreamReader;
-use anyhow::{Result, bail, anyhow};
+use anyhow::{Result, anyhow, bail};
 use std::io::ErrorKind;
+use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream, UdpSocket};
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 const STREAMING_TIMEOUT_MILLIS: u64 = 1000;
 const CHECK_TCP_CMD_MILLIS: u64 = 100;
@@ -22,7 +22,7 @@ const CHECK_TCP_CMD_EVENT: &str = "check_tcp_cmd";
 const ACCEPT_EVENT: &str = "accept";
 
 /// Управляющие команды сервером
-pub enum ControlCmd{
+pub enum ControlCmd {
     /// Остановить сервер
     Stop,
     /// Генерировать выбранные котировки
@@ -32,17 +32,15 @@ pub enum ControlCmd{
 }
 
 fn cmd_from_channel(rx: &mpsc::Receiver<ControlCmd>) -> ControlCmd {
-    match rx.try_recv(){
+    match rx.try_recv() {
         Ok(cmd) => cmd,
-        Err(e) => {
-            match e {
-                TryRecvError::Disconnected => {
-                    log::warn!("Parent thread is died");
-                    return ControlCmd::Stop;
-                }
-                TryRecvError::Empty => return ControlCmd::Noop,
+        Err(e) => match e {
+            TryRecvError::Disconnected => {
+                log::warn!("Parent thread is died");
+                return ControlCmd::Stop;
             }
-        }
+            TryRecvError::Empty => return ControlCmd::Noop,
+        },
     }
 }
 
@@ -66,21 +64,18 @@ impl QuotesStream {
 
     fn check_ping(&self, socket: &UdpSocket) -> Result<()> {
         let mut recv_buf = [0u8; MAX_SIZE_DATAGRAM];
-        let (pack_len, client_addr) =
-        match socket.recv_from(&mut recv_buf){
+        let (pack_len, client_addr) = match socket.recv_from(&mut recv_buf) {
             Ok((len, addr)) => (len, addr),
-            Err(e) => {
-                match e.kind() {
-                    ErrorKind::WouldBlock => return Ok(()),
-                    _ => {
-                        bail!("Can't read from socket: {e}");
-                    }
+            Err(e) => match e.kind() {
+                ErrorKind::WouldBlock => return Ok(()),
+                _ => {
+                    bail!("Can't read from socket: {e}");
                 }
-            }
+            },
         };
 
         if pack_len == 0 {
-            return Ok(())
+            return Ok(());
         }
 
         let msg = postcard::from_bytes::<Message>(&recv_buf[..pack_len])?;
@@ -97,24 +92,21 @@ impl QuotesStream {
     }
 
     fn send_quote(&self, socket: &UdpSocket, port: u16, quote: Option<StockQuote>) -> Result<()> {
-        let quote_msg =
-        if let Some(val) = quote {
-            Message::Quote(QuoteRespMessage{
-                quote: val
-            })
-        }else{
+        let quote_msg = if let Some(val) = quote {
+            Message::Quote(QuoteRespMessage { quote: val })
+        } else {
             Message::Unknown
         };
 
         let bin_msg = postcard::to_stdvec(&quote_msg)?;
-        let _= socket.send_to(&bin_msg, SocketAddr::new(self.client_ip_addr, port))?;
+        let _ = socket.send_to(&bin_msg, SocketAddr::new(self.client_ip_addr, port))?;
         Ok(())
     }
 
     fn start(self) -> QuotesStreamControl {
         log::info!("Start streaming quotes");
         let (tx, rx): (Sender<ControlCmd>, Receiver<ControlCmd>) = mpsc::channel();
-        let handle = thread::spawn(move ||{
+        let handle = thread::spawn(move || {
             let socket = UdpSocket::bind("127.0.0.1:34254")?;
             socket.set_nonblocking(true)?;
 
@@ -133,8 +125,8 @@ impl QuotesStream {
                     match cmd_from_channel(&rx) {
                         ControlCmd::Stop => {
                             log::info!("Stop streaming");
-                            break
-                        },
+                            break;
+                        }
                         ControlCmd::Quotes(req) => {
                             log::debug!("Quotes request: {:?}", req);
                             cur_client_port = Some(req.port);
@@ -146,19 +138,23 @@ impl QuotesStream {
 
                 if timer.is_expired_event(CHECK_PING_EVENT)? {
                     timer.reset_event(CHECK_PING_EVENT)?;
-                    
-                    if let Err(e) = self.check_ping(&socket){
+
+                    if let Err(e) = self.check_ping(&socket) {
                         log::error!("Check ping error: {e}");
                         break;
                     }
                 }
-                
+
                 if timer.is_expired_event(STREAM_EVENT)? {
                     timer.reset_event(STREAM_EVENT)?;
                     if let Some(port) = cur_client_port {
                         for need_quote in need_quotes.iter() {
-                            let quote = self.quote_generator.lock().unwrap().generate_quote(need_quote.as_str());
-                            if let Err(e) = self.send_quote(&socket, port, quote){
+                            let quote = self
+                                .quote_generator
+                                .lock()
+                                .unwrap()
+                                .generate_quote(need_quote.as_str());
+                            if let Err(e) = self.send_quote(&socket, port, quote) {
                                 log::error!("Send quote error: {e}");
                                 break;
                             }
@@ -205,8 +201,9 @@ impl CommandHandler {
         let (tx, rx) = mpsc::channel();
 
         log::info!("Start new handler for quote requests");
-        let handle = thread::spawn(move ||{
-            let qoutes_stream_control = QuotesStream::new(quote_generator, self.client_addr.ip()).start();
+        let handle = thread::spawn(move || {
+            let qoutes_stream_control =
+                QuotesStream::new(quote_generator, self.client_addr.ip()).start();
             let mut state = HandlerState::WaitPackLen;
             let mut timer = Timer::default();
             timer.add_event(WAIT_CMD_EVENT, HANDLE_CMD_PERIOD_MILLIS);
@@ -223,7 +220,7 @@ impl CommandHandler {
                         ControlCmd::Stop => {
                             log::debug!("Stop command received from Client handler");
                             break;
-                        },
+                        }
                         _ => {}
                     }
                 }
@@ -232,39 +229,41 @@ impl CommandHandler {
                     timer.reset_event(CHECK_TCP_CMD_EVENT)?;
                     match state {
                         HandlerState::WaitPackLen => {
-                            if let Err(e) = stream_reader.read_from_stream(&mut self.conn){
+                            if let Err(e) = stream_reader.read_from_stream(&mut self.conn) {
                                 log::info!("Connection error: {e}");
                                 break;
                             }
-                            let bin_len =
-                            if let Some(val) = stream_reader.extract_chunk(4){
+                            let bin_len = if let Some(val) = stream_reader.extract_chunk(4) {
                                 val
-                            }else{
+                            } else {
                                 continue;
                             };
 
-                            let len: [u8; 4]  = bin_len.try_into().map_err(|_| anyhow!("Parse error"))?;
+                            let len: [u8; 4] =
+                                bin_len.try_into().map_err(|_| anyhow!("Parse error"))?;
 
-                            log::debug!("Packet len is received: {}", u32::from_be_bytes(len.into()));
+                            log::debug!(
+                                "Packet len is received: {}",
+                                u32::from_be_bytes(len.into())
+                            );
                             state = HandlerState::WaitPack(u32::from_be_bytes(len));
                         }
                         HandlerState::WaitPack(len) => {
-                            if let Err(e) = stream_reader.read_from_stream(&mut self.conn){
+                            if let Err(e) = stream_reader.read_from_stream(&mut self.conn) {
                                 log::info!("Connection error: {e}");
                                 break;
                             }
                             let bin_message =
-                            if let Some(val) = stream_reader.extract_chunk(len as usize){
-                                val
-                            }else{
-                                log::error!("Can't receive full packet");
-                                break;
-                            };
+                                if let Some(val) = stream_reader.extract_chunk(len as usize) {
+                                    val
+                                } else {
+                                    log::error!("Can't receive full packet");
+                                    break;
+                                };
 
                             let msg = postcard::from_bytes::<Message>(&bin_message)?;
                             log::debug!("Message: {:?}", msg);
-                            let tickers =
-                            match msg {
+                            let tickers = match msg {
                                 Message::Tickers(tickers) => tickers,
                                 _ => break,
                             };
@@ -277,8 +276,7 @@ impl CommandHandler {
             }
 
             let _ = qoutes_stream_control.tx.send(ControlCmd::Stop);
-            let res =
-            match qoutes_stream_control.thread_handle.join(){
+            let res = match qoutes_stream_control.thread_handle.join() {
                 Ok(val) => val,
                 Err(_) => {
                     bail!("Can't join thread");
@@ -311,7 +309,7 @@ impl QuotesServer {
     /// Создание сервера с указанием пути к конфигурации генератора котировок
     pub fn new(config_path: &str) -> Result<Self> {
         let generator = Arc::new(Mutex::new(QuoteGenerator::new(config_path)?));
-        Ok(Self{
+        Ok(Self {
             quotes_generator: generator,
         })
     }
@@ -321,10 +319,10 @@ impl QuotesServer {
         let listener = TcpListener::bind("127.0.0.1:80")?;
         listener.set_nonblocking(true)?;
 
-        log::info!("Quotes streaming server is started");        
+        log::info!("Quotes streaming server is started");
         let (tx, rx) = mpsc::channel();
-        
-        let handle = thread::spawn(move ||{
+
+        let handle = thread::spawn(move || {
             let mut handlers = Vec::new();
             let mut timer = Timer::default();
             timer.add_event(WAIT_CMD_EVENT, HANDLE_CMD_PERIOD_MILLIS);
@@ -338,33 +336,29 @@ impl QuotesServer {
                         ControlCmd::Stop => {
                             log::debug!("Stop command received in quote server");
                             break;
-                        },
+                        }
                         _ => {}
                     }
                 }
 
                 if timer.is_expired_event(ACCEPT_EVENT)? {
-                    let (connection, addr) =
-                    match listener.accept() {
+                    let (connection, addr) = match listener.accept() {
                         Ok((conn, addr)) => {
                             log::debug!("Accept new connection from address: {addr}");
                             (conn, addr)
-                        },
-                        Err(e) => {
-                            match e.kind() {
-                                std::io::ErrorKind::WouldBlock => {
-                                    continue;
-                                }
-                                _ => {
-                                    log::error!("Can't accept connection");
-                                    break;
-                                }
-                            }
                         }
+                        Err(e) => match e.kind() {
+                            std::io::ErrorKind::WouldBlock => {
+                                continue;
+                            }
+                            _ => {
+                                log::error!("Can't accept connection");
+                                break;
+                            }
+                        },
                     };
 
-                    let handler =
-                    match CommandHandler::new(connection, addr) {
+                    let handler = match CommandHandler::new(connection, addr) {
                         Ok(val) => val.start(self.quotes_generator.clone()),
                         Err(e) => {
                             log::error!("Can't handle connection: {e}");
@@ -378,7 +372,7 @@ impl QuotesServer {
 
             for handler in handlers {
                 handler.tx.send(ControlCmd::Stop)?;
-                match handler.thread_handle.join(){
+                match handler.thread_handle.join() {
                     Ok(res) => {
                         if res.is_err() {
                             return res;
@@ -391,9 +385,8 @@ impl QuotesServer {
             }
             log::info!("Server is stopped");
             Ok(())
-        }
-        );
-        Ok(ServerControl{
+        });
+        Ok(ServerControl {
             tx,
             thread_handle: handle,
         })
