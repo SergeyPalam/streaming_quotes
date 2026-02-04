@@ -83,3 +83,31 @@ impl Timer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sleep() {
+        let mut timer = Timer::default();
+        timer.add_event("A", 20);
+        timer.add_event("B", 30);
+
+        timer.sleep();
+        assert_eq!(timer.is_expired_event("A").unwrap(), false);
+        assert_eq!(timer.is_expired_event("B").unwrap(), false);
+        timer.sleep();
+        assert_eq!(timer.is_expired_event("A").unwrap(), true);
+        assert_eq!(timer.is_expired_event("B").unwrap(), false);
+        timer.sleep();
+        assert_eq!(timer.is_expired_event("A").unwrap(), true);
+        assert_eq!(timer.is_expired_event("B").unwrap(), true);
+
+        timer.reset_event("A").unwrap();
+        timer.reset_event("B").unwrap();
+
+        assert_eq!(timer.is_expired_event("A").unwrap(), false);
+        assert_eq!(timer.is_expired_event("B").unwrap(), false);
+    }
+}

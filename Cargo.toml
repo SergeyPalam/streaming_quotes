@@ -13,3 +13,6 @@ flexi_logger = "=0.31.8"
 anyhow = "=1.0.100"
 log = "=0.4.29"
 clap = {version = "=4.5.54", features = ["derive"]}
+
+[dev-dependencies]
+tempfile = "=3.24.0"

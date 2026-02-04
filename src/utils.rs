@@ -39,3 +39,23 @@ impl StreamReader {
         Some(res)
     } 
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+    
+    #[test]
+    fn test_stream_reader() {
+        let buf = vec![1u8, 2, 3];
+        let mut stream = Cursor::new(buf);
+        let mut reader = StreamReader::default();
+        reader.read_from_stream(&mut stream).unwrap();
+        let chunk = reader.extract_chunk(2).unwrap();
+        assert_eq!(vec![1, 2], chunk);
+        let rem = reader.extract_chunk(2);
+        assert!(rem.is_none());
+        let chunk = reader.extract_chunk(1).unwrap();
+        assert_eq!(vec![3], chunk);
+    }
+}

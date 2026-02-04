@@ -1,14 +1,20 @@
 [
     {
         "name": "AMD",
-        "upper_bound_price": "1000.0",
-        "upper_bound_volume": "1000000.0",
-        "lower_bound_volume": "1000"
+        "upper_bound_price": 1000.0,
+        "upper_bound_volume": 1000000,
+        "lower_bound_volume": 1000
     },
     {
         "name": "INT",
-        "upper_bound_price": "2000.0",
-        "upper_bound_volume": "2000000.0",
-        "lower_bound_volume": "1000"
+        "upper_bound_price": 2000.0,
+        "upper_bound_volume": 2000000,
+        "lower_bound_volume": 1000
+    },
+    {
+        "name": "GAZ",
+        "upper_bound_price": 3000.0,
+        "upper_bound_volume": 3000000,
+        "lower_bound_volume": 3000
     }
 ]

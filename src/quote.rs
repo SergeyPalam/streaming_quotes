@@ -106,3 +106,56 @@ impl QuoteGenerator {
         Some(quote)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+    use std::fs::File;
+
+    use super::*;
+    use serde_json::json;
+    use tempfile::tempdir;
+
+    const EPSILON: f64 = 1e-6;
+
+    #[test]
+    fn test_ticker_from_json() {
+        let val = json!({
+            "upper_bound_price" : 2.0,
+            "upper_bound_volume" : 10,
+            "lower_bound_volume" : 2,
+        });
+        let ticker = Ticker::from_json(val).unwrap();
+        assert!((ticker.upper_bound_price - 2.0).abs() < EPSILON);
+        assert_eq!(ticker.upper_bound_volume, 10);
+        assert_eq!(ticker.lower_bound_volume, 2);
+    }
+
+    #[test]
+    fn test_quotes() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.txt");
+        let mut file = File::create(&path).unwrap();
+        let config = json!([
+            {
+                "name": "AMD",
+                "upper_bound_price": 1000.0,
+                "upper_bound_volume": 1000000,
+                "lower_bound_volume": 1000
+            },
+            {
+                "name": "INT",
+                "upper_bound_price": 2000.0,
+                "upper_bound_volume": 2000000,
+                "lower_bound_volume": 1000
+            }
+        ]).to_string();
+        file.write_all(config.as_bytes()).unwrap();
+        file.flush().unwrap();
+
+        let mut generator = QuoteGenerator::new(path.to_str().unwrap()).unwrap();
+        assert!(generator.generate_quote("AMD").is_some());
+        assert!(generator.generate_quote("INT").is_some());
+        assert!(generator.generate_quote("GAZ").is_none());
+    }
+}
