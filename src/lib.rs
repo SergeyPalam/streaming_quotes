@@ -1,14 +1,30 @@
+//! # streaming_quotes
+//! > Библиотека для создание клиентской и серверной части работы с котировками
+
+#![warn(missing_docs)]
+/// Генератор котировок
 pub mod quote;
+
+/// Протокол взаимодействия клиент-сервер
 pub mod protocol;
+
+/// Многопоточный сервер
 pub mod server;
+
+/// Многопоточный клиент
 pub mod client;
+
+/// Таймер для отслеживания разных событий
 pub mod timer;
+
+/// Утилиты
 pub mod utils;
 
 use anyhow::Result;
 use flexi_logger::{Logger, FileSpec, Duplicate, opt_format};
 use std::path::Path;
 
+/// Инициализация лога
 #[cfg(debug_assertions)]
 pub fn init_log(log_path_dir: &Path, base_name: &str) -> Result<()> {
     Logger::try_with_str("debug")?.
@@ -28,14 +44,4 @@ pub fn init_log(log_path_dir: &Path) -> Result<()> {
         .start()?;
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        
-    }
 }

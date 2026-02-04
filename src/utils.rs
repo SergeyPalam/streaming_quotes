@@ -3,11 +3,14 @@ use anyhow::{Result, bail};
 use std::io::{Read, ErrorKind};
 
 #[derive(Default)]
+
+/// Объект позволяющий накапливать данные из потока и и читать данные пакетами
 pub struct StreamReader{
     buf: VecDeque<u8>,
 }
 
 impl StreamReader {
+    /// Читает в буфер все данные, доступные в потоке
     pub fn read_from_stream<T: Read>(&mut self, stream: &mut T) -> Result<()> {
         let mut buf = vec![0u8; 512];
         
@@ -27,6 +30,7 @@ impl StreamReader {
         }
     }
 
+    /// Читает пакет данных определенной длины, если это возможно
     pub fn extract_chunk(&mut self, chunk_len: usize) -> Option<Vec<u8>> {
         if self.buf.len() < chunk_len {
             return None;

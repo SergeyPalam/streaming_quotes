@@ -7,10 +7,15 @@ use anyhow::{bail, Result};
 use std::fmt::Display;
 
 #[derive(Serialize, Deserialize, Default, Debug)]
+/// Информация о котировке
 pub struct StockQuote {
+    /// Короткое название фин. инструмента
     pub ticker: String,
+    /// Текущаяя цена
     pub price: f64,
+    /// Текущий объем
     pub volume: u32,
+    /// Временная метка
     pub timestamp: u64,
 }
 
@@ -48,6 +53,8 @@ impl Ticker {
     }
 }
 
+/// Генератор котировок, использующий нормальное распределение для цены
+/// и равномерное распределение для объема
 pub struct QuoteGenerator {
     tickers: HashMap<String, Ticker>,
     timestamp_counter: u64,
@@ -55,6 +62,23 @@ pub struct QuoteGenerator {
 }
 
 impl QuoteGenerator {
+    /// Создать новый генератор с указанием пути к конфигурации json
+    /// ```
+    /// [
+    ///     {
+    ///         "name": "AMD",
+    ///         "upper_bound_price": 1000.0,
+    ///         "upper_bound_volume": 1000000,
+    ///         "lower_bound_volume": 1000
+    ///     },
+    ///     {
+    ///         "name": "INT",
+    ///         "upper_bound_price": 2000.0,
+    ///         "upper_bound_volume": 2000000,
+    ///         "lower_bound_volume": 1000
+    ///     }
+    ///]
+    /// ```
     pub fn new(config_path: &str) -> Result<Self> {
         let json_str = std::fs::read_to_string(config_path)?;
         let json = serde_json::from_str::<Vec<Value>>(&json_str)?;
@@ -82,6 +106,7 @@ impl QuoteGenerator {
         })
     }
 
+    /// Генерация котировки по выбранному тикеру
     pub fn generate_quote(&mut self, ticker_name: &str) -> Option<StockQuote> {
         let ticker = self.tickers.get_mut(ticker_name)?;
         let mut quote = StockQuote::default();

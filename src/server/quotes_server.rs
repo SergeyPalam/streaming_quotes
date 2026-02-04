@@ -21,9 +21,13 @@ const CHECK_PING_EVENT: &str = "check_ping";
 const CHECK_TCP_CMD_EVENT: &str = "check_tcp_cmd";
 const ACCEPT_EVENT: &str = "accept";
 
+/// Управляющие команды сервером
 pub enum ControlCmd{
+    /// Остановить сервер
     Stop,
+    /// Генерировать выбранные котировки
     Quotes(TickerReqMessage),
+    /// Нет команды
     Noop,
 }
 
@@ -290,16 +294,21 @@ impl CommandHandler {
     }
 }
 
+/// Интерфейс управления потоком сервера
 pub struct ServerControl {
+    /// Лтправка команды серверу
     pub tx: mpsc::Sender<ControlCmd>,
+    /// Дескриптор потока сервера
     pub thread_handle: thread::JoinHandle<Result<()>>,
 }
 
+/// Объект-поток сервер
 pub struct QuotesServer {
     quotes_generator: Arc<Mutex<QuoteGenerator>>,
 }
 
 impl QuotesServer {
+    /// Создание сервера с указанием пути к конфигурации генератора котировок
     pub fn new(config_path: &str) -> Result<Self> {
         let generator = Arc::new(Mutex::new(QuoteGenerator::new(config_path)?));
         Ok(Self{
@@ -307,6 +316,7 @@ impl QuotesServer {
         })
     }
 
+    /// Запуск потока сервера
     pub fn start(self) -> Result<ServerControl> {
         let listener = TcpListener::bind("127.0.0.1:80")?;
         listener.set_nonblocking(true)?;

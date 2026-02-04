@@ -19,7 +19,9 @@ const WAIT_PONG_EVENT: &str = "pong";
 const WAIT_CMD_EVENT: &str = "cmd";
 const WAIT_QUOTES_EVENT: &str = "quotes";
 
+/// Команды управления клиентом
 pub enum ClientCmd {
+    /// Остановить клиент
     Stop,
 }
 
@@ -150,11 +152,15 @@ impl PingPong {
     }
 }
 
+/// Интерфейс управления потоком клиента
 pub struct ClientControl {
-    pub thread_handle: thread::JoinHandle<Result<()>>,
+    /// Отправка команды потоку-клиента
     pub tx: mpsc::Sender<ClientCmd>,
+    /// Дескриптор потока-клиента
+    pub thread_handle: thread::JoinHandle<Result<()>>,
 }
 
+/// Клиент приёма котировок
 #[derive(Debug)]
 pub struct QuotesClient {
     server_addr: SocketAddr,
@@ -175,6 +181,13 @@ impl Display for QuotesClient {
 
 
 impl QuotesClient {
+    /// Создаёт новый клиент котировок:
+    /// server_addr - ip-алрес сервера для подключения по tcp
+    /// recv_quote_port - Порт для приема котировок
+    /// tickers_path - Путь к файлу с котировками в формате:
+    /// 
+    /// TICKER1
+    /// TICKER2
     pub fn new(server_addr: &str, recv_quote_port: u16, tickers_path: &str) -> Result<Self> {
         let file = std::fs::File::open(tickers_path)?;
         let read_buf = BufReader::new(file);
@@ -230,6 +243,7 @@ impl QuotesClient {
         Ok(())
     }
 
+    /// Запуск потока приёма котировок
     pub fn start_receive_quotes(self) -> Result<ClientControl> {
         let (tx, rx) = mpsc::channel();
         let udp_addr = SocketAddr::from(([127, 0, 0, 1], self.recv_quote_port));

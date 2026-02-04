@@ -33,11 +33,14 @@ impl Event {
 }
 
 #[derive(Default)]
+/// Таймер с минимольным тиком 10 мс
+/// Используется для мониторинга событий с разными временными окнами
 pub struct Timer {
     events: HashMap<String, Event>,
 }
 
 impl Timer {
+    /// Усыпляет поток на 10 мс и увеличивает счетчик всех подписанных событий
     pub fn sleep(&mut self) {
         thread::sleep(Duration::from_millis(TICK_MILLIS));
         for (_, event) in self.events.iter_mut() {
@@ -45,10 +48,12 @@ impl Timer {
         }
     }
 
+    /// Подписывает событие на мониторинг
     pub fn add_event(&mut self, event_name: &str, bound_millis: u64) {
         self.events.insert(event_name.to_string(), Event::new(bound_millis));
     }
 
+    /// Удаляет подписку события для таймера
     pub fn remove_event(&mut self, event_name: &str) -> Result<()> {
         match self.events.remove(event_name) {
             Some(_) => {
@@ -60,6 +65,7 @@ impl Timer {
         }
     }
 
+    /// Если время для события истекло, то чтобы нужно явно обнулить счетчик
     pub fn reset_event(&mut self, event_name: &str) -> Result<()> {
         match self.events.get_mut(event_name) {
             Some(evt) => {
@@ -72,6 +78,7 @@ impl Timer {
         }
     }
 
+    /// Прошло ли время для события
     pub fn is_expired_event(&self, event_name: &str) -> Result<bool> {
         match self.events.get(event_name) {
             Some(evt) => {
