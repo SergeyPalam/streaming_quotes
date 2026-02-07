@@ -24,7 +24,7 @@ use anyhow::Result;
 use flexi_logger::{Duplicate, FileSpec, Logger, opt_format};
 use std::path::Path;
 
-/// Инициализация лога
+/// Инициализация лога Debug конфигурация
 #[cfg(debug_assertions)]
 pub fn init_log(log_path_dir: &Path, base_name: &str) -> Result<()> {
     Logger::try_with_str("debug")?
@@ -40,15 +40,17 @@ pub fn init_log(log_path_dir: &Path, base_name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Инициализация лога Release конфигурация
 #[cfg(not(debug_assertions))]
-pub fn init_log(log_path_dir: &Path) -> Result<()> {
+pub fn init_log(log_path_dir: &Path, base_name: &str) -> Result<()> {
     Logger::try_with_str("info")?
         .log_to_file(
             FileSpec::default()
                 .directory(log_path_dir)
-                .basename("server.log"),
+                .basename(base_name),
         )
         .duplicate_to_stdout(Duplicate::All)
+        .format(opt_format)
         .start()?;
 
     Ok(())
