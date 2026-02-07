@@ -13,6 +13,7 @@ const STREAMING_TIMEOUT_MILLIS: u64 = 1000;
 const CHECK_TCP_CMD_MILLIS: u64 = 100;
 const HANDLE_CMD_PERIOD_MILLIS: u64 = 300;
 const CHECK_PING_MILLIS: u64 = 100;
+const PING_WAIT_MILLIS: u64 = 40000;
 const ACCEPT_MILLIS: u64 = 100;
 
 const STREAM_EVENT: &str = "stream";
@@ -62,12 +63,14 @@ impl QuotesStream {
         }
     }
 
-    fn check_ping(&self, socket: &UdpSocket) -> Result<()> {
+    fn check_ping(&self, socket: &UdpSocket) -> Result<bool> {
         let mut recv_buf = [0u8; MAX_SIZE_DATAGRAM];
         let (pack_len, client_addr) = match socket.recv_from(&mut recv_buf) {
             Ok((len, addr)) => (len, addr),
             Err(e) => match e.kind() {
-                ErrorKind::WouldBlock => return Ok(()),
+                ErrorKind::WouldBlock => return Ok(false),
+                // Windows send ICMP Port Unreachable for udp sockets
+                ErrorKind::ConnectionReset => return Ok(false),
                 _ => {
                     bail!("Can't read from socket: {e}");
                 }
@@ -75,7 +78,7 @@ impl QuotesStream {
         };
 
         if pack_len == 0 {
-            return Ok(());
+            return Ok(false);
         }
 
         let msg = postcard::from_bytes::<Message>(&recv_buf[..pack_len])?;
@@ -88,7 +91,7 @@ impl QuotesStream {
         socket.send_to(&bin_pong, client_addr)?;
         log::info!("PONG");
 
-        Ok(())
+        Ok(true)
     }
 
     fn send_quote(&self, socket: &UdpSocket, port: u16, quote: Option<StockQuote>) -> Result<()> {
@@ -117,6 +120,7 @@ impl QuotesStream {
             timer.add_event(STREAM_EVENT, STREAMING_TIMEOUT_MILLIS);
             timer.add_event(CHECK_PING_EVENT, CHECK_PING_MILLIS);
 
+            let mut wait_ping_counter = 0;
             loop {
                 timer.sleep();
 
@@ -139,8 +143,21 @@ impl QuotesStream {
                 if timer.is_expired_event(CHECK_PING_EVENT)? {
                     timer.reset_event(CHECK_PING_EVENT)?;
 
-                    if let Err(e) = self.check_ping(&socket) {
-                        log::error!("Check ping error: {e}");
+                    match self.check_ping(&socket) {
+                        Ok(is_ping_from_client) => {
+                            if is_ping_from_client {
+                                wait_ping_counter = 0;
+                            } else {
+                                wait_ping_counter += 1;
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("Check ping error: {e}");
+                            break;
+                        }
+                    }
+                    if wait_ping_counter >= PING_WAIT_MILLIS / CHECK_PING_MILLIS {
+                        log::info!("No ping from client");
                         break;
                     }
                 }

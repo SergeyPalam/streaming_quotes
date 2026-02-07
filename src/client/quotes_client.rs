@@ -59,19 +59,23 @@ impl PingPong {
         Self { server_addr }
     }
 
-    fn ping(sock: &UdpSocket) -> Result<()> {
+    fn ping(&self, sock: &UdpSocket) -> Result<()> {
         let bin_ping = postcard::to_stdvec(&Message::Ping)?;
-        sock.send(&bin_ping)?;
+        sock.send_to(&bin_ping, self.server_addr)?;
         log::info!("PING");
         Ok(())
     }
 
-    fn is_pong_received(sock: &UdpSocket) -> bool {
+    fn is_pong_received(&self, sock: &UdpSocket) -> bool {
         let mut recv_buf = [0u8; MAX_SIZE_DATAGRAM];
-        let pack_len = match sock.recv(&mut recv_buf) {
+        let (pack_len, server_addr) = match sock.recv_from(&mut recv_buf) {
             Ok(len) => len,
             Err(_) => return false,
         };
+
+        if self.server_addr != server_addr {
+            return false;
+        }
 
         let msg = match postcard::from_bytes::<Message>(&recv_buf[..pack_len]) {
             Ok(msg) => msg,
@@ -92,7 +96,6 @@ impl PingPong {
     fn start(self) -> Result<PingControl> {
         let udp_sock = UdpSocket::bind("127.0.0.1:5433")?;
         udp_sock.set_nonblocking(true)?;
-        udp_sock.connect(self.server_addr)?;
         log::info!("Ping pong start to server: {}", self.server_addr);
         let (tx, rx) = mpsc::channel();
         let handle = thread::spawn(move || {
@@ -114,7 +117,7 @@ impl PingPong {
                 match state {
                     PingState::WaitPing => {
                         if timer.is_expired_event(WAIT_PING_EVENT)? {
-                            Self::ping(&udp_sock)?;
+                            self.ping(&udp_sock)?;
                             timer.remove_event(WAIT_PING_EVENT)?;
                             timer.add_event(WAIT_PONG_EVENT, WAIT_PONG_MILLIS);
                             state = PingState::WaitPong;
@@ -122,7 +125,7 @@ impl PingPong {
                     }
                     PingState::WaitPong => {
                         if timer.is_expired_event(WAIT_PONG_EVENT)? {
-                            if !Self::is_pong_received(&udp_sock) {
+                            if !self.is_pong_received(&udp_sock) {
                                 log::info!("Pong doesn't received");
                                 break;
                             }
