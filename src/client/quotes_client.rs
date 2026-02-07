@@ -60,7 +60,8 @@ impl PingPong {
     }
 
     fn ping(&self, sock: &UdpSocket) -> Result<()> {
-        let bin_ping = postcard::to_stdvec(&Message::Ping)?;
+        let mut buf = [0u8; MAX_SIZE_DATAGRAM];
+        let bin_ping = postcard::to_slice(&Message::Ping, &mut buf)?;
         sock.send_to(&bin_ping, self.server_addr)?;
         log::info!("PING");
         Ok(())

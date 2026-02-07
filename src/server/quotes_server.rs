@@ -52,13 +52,14 @@ impl QuotesSender {
 
 impl QuoteCallback for QuotesSender {
     fn handle(self, quotes: Vec<StockQuote>) -> Result<()> {
+        let mut buf = [0u8; MAX_SIZE_DATAGRAM];
         for quote in quotes {
             if !self.need_quotes.contains(&quote.ticker) {
                 continue;
             }
 
             let quote_msg = Message::Quote(QuoteRespMessage { quote });
-            let bin_msg = postcard::to_stdvec(&quote_msg)?;
+            let bin_msg = postcard::to_slice(&quote_msg, &mut buf)?;
             let _ = self.udp_sock.send_to(&bin_msg, self.client_addr)?;
         }
 
@@ -121,7 +122,8 @@ impl QuotesStream {
             _ => bail!("Wrong message"),
         }
 
-        let bin_pong = postcard::to_stdvec(&Message::Pong)?;
+        let mut send_buf = [0u8; MAX_SIZE_DATAGRAM];
+        let bin_pong = postcard::to_slice(&Message::Pong, &mut send_buf)?;
         socket.send_to(&bin_pong, client_addr)?;
         log::info!("PONG");
 
