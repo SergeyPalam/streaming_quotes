@@ -229,7 +229,8 @@ impl QuotesClient {
         let quotes = match msg {
             Message::Quote(quotes) => quotes,
             _ => {
-                bail!("Wrong response");
+                log::warn!("Wrong response");
+                return Ok(());
             }
         };
         println!("{}", quotes.quote);
