@@ -106,8 +106,8 @@ pub struct QuoteGenerator {
 
 impl QuoteGenerator {
     /// Создать новый генератор с указанием пути к конфигурации json
-    /// ```
-    /// [
+    /// ```json
+    /// [ 
     ///     {
     ///         "name": "AMD",
     ///         "upper_bound_price": 1000.0,
@@ -122,6 +122,7 @@ impl QuoteGenerator {
     ///     }
     ///]
     /// ```
+    
     pub fn new(config_path: &str) -> Result<Self> {
         let json_str = std::fs::read_to_string(config_path)?;
         let json = serde_json::from_str::<Vec<Value>>(&json_str)?;
