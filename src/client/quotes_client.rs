@@ -191,7 +191,11 @@ impl QuotesClient {
         let read_buf = BufReader::new(file);
         let mut tickers = Vec::new();
         for line in read_buf.lines() {
-            tickers.push(line?);
+            let line = line?.trim().to_string();
+            if line.is_empty() {
+                continue;
+            }
+            tickers.push(line);
         }
 
         Ok(Self {
