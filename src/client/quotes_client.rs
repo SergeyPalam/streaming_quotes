@@ -95,7 +95,7 @@ impl PingPong {
     }
 
     fn start(self) -> Result<PingControl> {
-        let udp_sock = UdpSocket::bind("127.0.0.1:5433")?;
+        let udp_sock = UdpSocket::bind("127.0.0.1:0")?;
         udp_sock.set_nonblocking(true)?;
         log::info!("Ping pong start to server: {}", self.server_addr);
         let (tx, rx) = mpsc::channel();

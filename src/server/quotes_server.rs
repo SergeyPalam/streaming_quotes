@@ -134,7 +134,7 @@ impl QuotesStream {
         log::info!("Start streaming quotes");
         let (tx, rx): (Sender<ControlCmd>, Receiver<ControlCmd>) = mpsc::channel();
         let handle = thread::spawn(move || {
-            let socket = Arc::new(UdpSocket::bind("127.0.0.1:34254")?);
+            let socket = Arc::new(UdpSocket::bind("127.0.0.1:0")?);
             socket.set_nonblocking(true)?;
 
             let mut need_quotes = Vec::new();
