@@ -1,18 +1,20 @@
 use crate::protocol::*;
-use crate::quote::{QuoteGenerator, StockQuote};
+use crate::quote::{CallbackSender, GeneratorCmd, QuoteCallback, QuoteGenerator, StockQuote};
 use crate::timer::Timer;
 use crate::utils::StreamReader;
 use anyhow::{Result, anyhow, bail};
+use std::collections::HashSet;
 use std::io::ErrorKind;
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream, UdpSocket};
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
-use std::sync::{Arc, Mutex};
 use std::thread;
 
 const STREAMING_TIMEOUT_MILLIS: u64 = 1000;
 const CHECK_TCP_CMD_MILLIS: u64 = 100;
 const HANDLE_CMD_PERIOD_MILLIS: u64 = 300;
 const CHECK_PING_MILLIS: u64 = 100;
+const PING_WAIT_MILLIS: u64 = 40000;
 const ACCEPT_MILLIS: u64 = 100;
 
 const STREAM_EVENT: &str = "stream";
@@ -29,6 +31,40 @@ pub enum ControlCmd {
     Quotes(TickerReqMessage),
     /// Нет команды
     Noop,
+}
+
+#[derive(Clone)]
+struct QuotesSender {
+    udp_sock: Arc<UdpSocket>,
+    client_addr: SocketAddr,
+    need_quotes: HashSet<String>,
+}
+
+impl QuotesSender {
+    fn new(sock: Arc<UdpSocket>, client_ip: IpAddr, port: u16, need_quotes: &Vec<String>) -> Self {
+        Self {
+            udp_sock: sock,
+            client_addr: SocketAddr::new(client_ip, port),
+            need_quotes: HashSet::from_iter(need_quotes.clone().into_iter()),
+        }
+    }
+}
+
+impl QuoteCallback for QuotesSender {
+    fn handle(self, quotes: Vec<StockQuote>) -> Result<()> {
+        let mut buf = [0u8; MAX_SIZE_DATAGRAM];
+        for quote in quotes {
+            if !self.need_quotes.contains(&quote.ticker) {
+                continue;
+            }
+
+            let quote_msg = Message::Quote(QuoteRespMessage { quote });
+            let bin_msg = postcard::to_slice(&quote_msg, &mut buf)?;
+            let _ = self.udp_sock.send_to(&bin_msg, self.client_addr)?;
+        }
+
+        Ok(())
+    }
 }
 
 fn cmd_from_channel(rx: &mpsc::Receiver<ControlCmd>) -> ControlCmd {
@@ -50,24 +86,26 @@ struct QuotesStreamControl {
 }
 
 struct QuotesStream {
-    quote_generator: Arc<Mutex<QuoteGenerator>>,
+    callback_sender: CallbackSender<QuotesSender>,
     client_ip_addr: IpAddr,
 }
 
 impl QuotesStream {
-    fn new(quote_generator: Arc<Mutex<QuoteGenerator>>, client_ip_addr: IpAddr) -> Self {
+    fn new(callback_sender: CallbackSender<QuotesSender>, client_ip_addr: IpAddr) -> Self {
         Self {
-            quote_generator,
+            callback_sender,
             client_ip_addr,
         }
     }
 
-    fn check_ping(&self, socket: &UdpSocket) -> Result<()> {
+    fn check_ping(&self, socket: &UdpSocket) -> Result<bool> {
         let mut recv_buf = [0u8; MAX_SIZE_DATAGRAM];
         let (pack_len, client_addr) = match socket.recv_from(&mut recv_buf) {
             Ok((len, addr)) => (len, addr),
             Err(e) => match e.kind() {
-                ErrorKind::WouldBlock => return Ok(()),
+                ErrorKind::WouldBlock => return Ok(false),
+                // Windows send ICMP Port Unreachable for udp sockets
+                ErrorKind::ConnectionReset => return Ok(false),
                 _ => {
                     bail!("Can't read from socket: {e}");
                 }
@@ -75,7 +113,7 @@ impl QuotesStream {
         };
 
         if pack_len == 0 {
-            return Ok(());
+            return Ok(false);
         }
 
         let msg = postcard::from_bytes::<Message>(&recv_buf[..pack_len])?;
@@ -84,30 +122,19 @@ impl QuotesStream {
             _ => bail!("Wrong message"),
         }
 
-        let bin_pong = postcard::to_stdvec(&Message::Pong)?;
+        let mut send_buf = [0u8; MAX_SIZE_DATAGRAM];
+        let bin_pong = postcard::to_slice(&Message::Pong, &mut send_buf)?;
         socket.send_to(&bin_pong, client_addr)?;
         log::info!("PONG");
 
-        Ok(())
-    }
-
-    fn send_quote(&self, socket: &UdpSocket, port: u16, quote: Option<StockQuote>) -> Result<()> {
-        let quote_msg = if let Some(val) = quote {
-            Message::Quote(QuoteRespMessage { quote: val })
-        } else {
-            Message::Unknown
-        };
-
-        let bin_msg = postcard::to_stdvec(&quote_msg)?;
-        let _ = socket.send_to(&bin_msg, SocketAddr::new(self.client_ip_addr, port))?;
-        Ok(())
+        Ok(true)
     }
 
     fn start(self) -> QuotesStreamControl {
         log::info!("Start streaming quotes");
         let (tx, rx): (Sender<ControlCmd>, Receiver<ControlCmd>) = mpsc::channel();
         let handle = thread::spawn(move || {
-            let socket = UdpSocket::bind("127.0.0.1:34254")?;
+            let socket = Arc::new(UdpSocket::bind("127.0.0.1:0")?);
             socket.set_nonblocking(true)?;
 
             let mut need_quotes = Vec::new();
@@ -117,6 +144,7 @@ impl QuotesStream {
             timer.add_event(STREAM_EVENT, STREAMING_TIMEOUT_MILLIS);
             timer.add_event(CHECK_PING_EVENT, CHECK_PING_MILLIS);
 
+            let mut wait_ping_counter = 0;
             loop {
                 timer.sleep();
 
@@ -139,25 +167,38 @@ impl QuotesStream {
                 if timer.is_expired_event(CHECK_PING_EVENT)? {
                     timer.reset_event(CHECK_PING_EVENT)?;
 
-                    if let Err(e) = self.check_ping(&socket) {
-                        log::error!("Check ping error: {e}");
+                    match self.check_ping(&socket) {
+                        Ok(is_ping_from_client) => {
+                            if is_ping_from_client {
+                                wait_ping_counter = 0;
+                            } else {
+                                wait_ping_counter += 1;
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("Check ping error: {e}");
+                            break;
+                        }
+                    }
+                    if wait_ping_counter >= PING_WAIT_MILLIS / CHECK_PING_MILLIS {
+                        log::info!("No ping from client");
                         break;
                     }
                 }
 
                 if timer.is_expired_event(STREAM_EVENT)? {
                     timer.reset_event(STREAM_EVENT)?;
+
                     if let Some(port) = cur_client_port {
-                        for need_quote in need_quotes.iter() {
-                            let quote = self
-                                .quote_generator
-                                .lock()
-                                .unwrap()
-                                .generate_quote(need_quote.as_str());
-                            if let Err(e) = self.send_quote(&socket, port, quote) {
-                                log::error!("Send quote error: {e}");
-                                break;
-                            }
+                        let quotes_sender = QuotesSender::new(
+                            socket.clone(),
+                            self.client_ip_addr,
+                            port,
+                            &need_quotes,
+                        );
+                        if let Err(e) = self.callback_sender.tx.send(quotes_sender) {
+                            log::error!("Send quote error: {e}");
+                            break;
                         }
                     }
                 }
@@ -197,13 +238,13 @@ impl CommandHandler {
         })
     }
 
-    fn start(mut self, quote_generator: Arc<Mutex<QuoteGenerator>>) -> HanlerControl {
+    fn start(mut self, callback_sender: CallbackSender<QuotesSender>) -> HanlerControl {
         let (tx, rx) = mpsc::channel();
 
         log::info!("Start new handler for quote requests");
         let handle = thread::spawn(move || {
             let qoutes_stream_control =
-                QuotesStream::new(quote_generator, self.client_addr.ip()).start();
+                QuotesStream::new(callback_sender, self.client_addr.ip()).start();
             let mut state = HandlerState::WaitPackLen;
             let mut timer = Timer::default();
             timer.add_event(WAIT_CMD_EVENT, HANDLE_CMD_PERIOD_MILLIS);
@@ -302,13 +343,13 @@ pub struct ServerControl {
 
 /// Объект-поток сервер
 pub struct QuotesServer {
-    quotes_generator: Arc<Mutex<QuoteGenerator>>,
+    quotes_generator: QuoteGenerator,
 }
 
 impl QuotesServer {
     /// Создание сервера с указанием пути к конфигурации генератора котировок
     pub fn new(config_path: &str) -> Result<Self> {
-        let generator = Arc::new(Mutex::new(QuoteGenerator::new(config_path)?));
+        let generator = QuoteGenerator::new(config_path)?;
         Ok(Self {
             quotes_generator: generator,
         })
@@ -327,6 +368,9 @@ impl QuotesServer {
             let mut timer = Timer::default();
             timer.add_event(WAIT_CMD_EVENT, HANDLE_CMD_PERIOD_MILLIS);
             timer.add_event(ACCEPT_EVENT, ACCEPT_MILLIS);
+
+            let (gen_control, callback_sender) =
+                self.quotes_generator.start_generate_quote::<QuotesSender>();
 
             loop {
                 timer.sleep();
@@ -359,7 +403,7 @@ impl QuotesServer {
                     };
 
                     let handler = match CommandHandler::new(connection, addr) {
-                        Ok(val) => val.start(self.quotes_generator.clone()),
+                        Ok(val) => val.start(callback_sender.clone()),
                         Err(e) => {
                             log::error!("Can't handle connection: {e}");
                             break;
@@ -381,6 +425,18 @@ impl QuotesServer {
                     Err(_) => {
                         bail!("Can't join thread");
                     }
+                }
+            }
+
+            gen_control.tx.send(GeneratorCmd::Stop)?;
+            match gen_control.handle.join() {
+                Ok(res) => {
+                    if res.is_err() {
+                        return res;
+                    }
+                }
+                Err(_) => {
+                    bail!("Can't join thread");
                 }
             }
             log::info!("Server is stopped");

@@ -1,3 +1,4 @@
+use super::timer::Timer;
 use anyhow::{Result, bail};
 use rand::prelude::*;
 use rand_distr::{Normal, StandardUniform};
@@ -5,6 +6,26 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::sync::mpsc::{self, channel};
+use std::thread::{self, JoinHandle};
+
+const HANDLE_CMD_PERIOD_MILLIS: u64 = 100;
+const WAIT_CALLBACK_MILLIS: u64 = 100;
+
+const WAIT_CMD_EVENT: &str = "cmd";
+const WAIT_CALLBACK_EVENT: &str = "callback";
+
+/// Треит, представляющий колбэк, передающийся генератору для обработки сгенерированных котировок
+pub trait QuoteCallback {
+    /// Обработка котировок
+    fn handle(self, quotes: Vec<StockQuote>) -> Result<()>;
+}
+
+/// Управление генератором котировок
+pub enum GeneratorCmd {
+    /// Остановить генератор
+    Stop,
+}
 
 #[derive(Serialize, Deserialize, Default, Debug)]
 /// Информация о котировке
@@ -57,6 +78,24 @@ impl Ticker {
     }
 }
 
+/// Управление потоком генератора
+pub struct GeneratorControl {
+    /// Интерфейс отправки команд управления генератором
+    pub tx: mpsc::Sender<GeneratorCmd>,
+    /// Дескриптор потока генератора
+    pub handle: JoinHandle<Result<()>>,
+}
+
+/// Канал передачи колбэка генератору
+#[derive(Clone)]
+pub struct CallbackSender<T>
+where
+    T: QuoteCallback + Send + 'static,
+{
+    /// Интерфейс отпраки колбэка
+    pub tx: mpsc::Sender<T>,
+}
+
 /// Генератор котировок, использующий нормальное распределение для цены
 /// и равномерное распределение для объема
 pub struct QuoteGenerator {
@@ -67,8 +106,8 @@ pub struct QuoteGenerator {
 
 impl QuoteGenerator {
     /// Создать новый генератор с указанием пути к конфигурации json
-    /// ```
-    /// [
+    /// ```json
+    /// [ 
     ///     {
     ///         "name": "AMD",
     ///         "upper_bound_price": 1000.0,
@@ -83,6 +122,7 @@ impl QuoteGenerator {
     ///     }
     ///]
     /// ```
+    
     pub fn new(config_path: &str) -> Result<Self> {
         let json_str = std::fs::read_to_string(config_path)?;
         let json = serde_json::from_str::<Vec<Value>>(&json_str)?;
@@ -108,29 +148,85 @@ impl QuoteGenerator {
         })
     }
 
-    /// Генерация котировки по выбранному тикеру
-    pub fn generate_quote(&mut self, ticker_name: &str) -> Option<StockQuote> {
-        let ticker = self.tickers.get_mut(ticker_name)?;
-        let mut quote = StockQuote::default();
-        quote.ticker = ticker_name.to_string();
+    fn generate_quotes(&mut self) -> Vec<StockQuote> {
+        let mut quotes = Vec::new();
+        for (name, ticker) in self.tickers.iter_mut() {
+            let mut quote = StockQuote::default();
+            quote.ticker = name.to_string();
 
-        quote.timestamp = self.timestamp_counter;
+            quote.timestamp = self.timestamp_counter;
+
+            let val_price: f64 = rand::rng().sample(self.normal_distr);
+            quote.price = ticker.current_price + (ticker.price_range() / 64.0) * val_price;
+            if quote.price < 0.0 {
+                quote.price = 0.0;
+            }
+            if quote.price > ticker.upper_bound_price {
+                quote.price = ticker.upper_bound_price;
+            }
+            ticker.current_price = quote.price;
+
+            let val_volume: u32 = rand::rng().sample(StandardUniform);
+            quote.volume = val_volume % ticker.volume_range() + ticker.lower_bound_volume;
+            quotes.push(quote);
+        }
         self.timestamp_counter += 1;
+        quotes
+    }
 
-        let val_price: f64 = rand::rng().sample(self.normal_distr);
-        quote.price = ticker.current_price + (ticker.price_range() / 64.0) * val_price;
-        if quote.price < 0.0 {
-            quote.price = 0.0;
-        }
-        if quote.price > ticker.upper_bound_price {
-            quote.price = ticker.upper_bound_price;
-        }
-        ticker.current_price = quote.price;
+    /// Генерация котировки по выбранному тикеру
+    pub fn start_generate_quote<T>(mut self) -> (GeneratorControl, CallbackSender<T>)
+    where
+        T: QuoteCallback + Send + 'static,
+    {
+        let (tx_cmd, rx_cmd): (mpsc::Sender<GeneratorCmd>, mpsc::Receiver<GeneratorCmd>) =
+            channel();
+        let (tx_callback, rx_callback): (mpsc::Sender<T>, mpsc::Receiver<T>) = channel();
+        let handle = thread::spawn(move || {
+            let mut timer = Timer::default();
+            timer.add_event(WAIT_CMD_EVENT, HANDLE_CMD_PERIOD_MILLIS);
+            timer.add_event(WAIT_CALLBACK_EVENT, WAIT_CALLBACK_MILLIS);
 
-        let val_volume: u32 = rand::rng().sample(StandardUniform);
-        quote.volume = val_volume % ticker.volume_range() + ticker.lower_bound_volume;
+            loop {
+                timer.sleep();
 
-        Some(quote)
+                if timer.is_expired_event(WAIT_CMD_EVENT)? {
+                    timer.reset_event(WAIT_CMD_EVENT)?;
+                    match rx_cmd.try_recv() {
+                        Ok(cmd) => match cmd {
+                            GeneratorCmd::Stop => {
+                                break;
+                            }
+                        },
+                        Err(e) => match e {
+                            mpsc::TryRecvError::Disconnected => {
+                                log::warn!("Parent thread is died");
+                                break;
+                            }
+                            mpsc::TryRecvError::Empty => {}
+                        },
+                    }
+                }
+
+                if timer.is_expired_event(WAIT_CALLBACK_EVENT)? {
+                    timer.reset_event(WAIT_CALLBACK_EVENT)?;
+                    match rx_callback.try_recv() {
+                        Ok(callback) => {
+                            let _ = callback.handle(self.generate_quotes());
+                        }
+                        Err(_) => continue,
+                    }
+                }
+            }
+
+            log::info!("Quotes generator stopped");
+            Ok(())
+        });
+
+        (
+            GeneratorControl { tx: tx_cmd, handle },
+            CallbackSender { tx: tx_callback },
+        )
     }
 }
 
@@ -182,8 +278,9 @@ mod tests {
         file.flush().unwrap();
 
         let mut generator = QuoteGenerator::new(path.to_str().unwrap()).unwrap();
-        assert!(generator.generate_quote("AMD").is_some());
-        assert!(generator.generate_quote("INT").is_some());
-        assert!(generator.generate_quote("GAZ").is_none());
+        let quotes = generator.generate_quotes();
+        assert!(quotes.iter().any(|item| item.ticker == "AMD"));
+        assert!(quotes.iter().any(|item| item.ticker == "INT"));
+        assert!(!quotes.iter().any(|item| item.ticker == "GAZ"));
     }
 }
